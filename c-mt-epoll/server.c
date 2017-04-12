@@ -20,10 +20,11 @@
     do { fprintf(stderr, __VA_ARGS__); exit(EXIT_FAILURE); } while (0)
 
 #define NUM_THREADS 4
-#define PORT 7000
 #define MAX_EVENTS_SIZE 1024
 #define MAX_BUFFER_SIZE 16
 #define MAX_LINE_SIZE 1024
+
+static int PORT = 7000;
 
 typedef struct thread_info {
     pthread_t thread_id;
@@ -197,9 +198,10 @@ static void *worker_routine(void *data) {
 }
 
 int main(int argc, char *argv[]) {
-    pthread_t t;
     struct thread_info *tinfo = NULL;
     int s = -1, i = -1;
+
+    if (argc == 2) PORT = atoi(argv[1]);
 
     tinfo = calloc(NUM_THREADS, sizeof(struct thread_info));
     if (!tinfo) handle_error("calloc: tinfo\n");
@@ -211,7 +213,7 @@ int main(int argc, char *argv[]) {
         if (s != 0) handle_error("pthread_create\n");
     }
 
-    // never reach here
+    // may not reach here
     // join all threads
     for (i = 0; i < NUM_THREADS; i++) {
         s = pthread_join(tinfo[i].thread_id, NULL);

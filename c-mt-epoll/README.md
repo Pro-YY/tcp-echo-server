@@ -1,6 +1,6 @@
 # Multi-threaded Epoll TCP Echo Server
 
-###Build with cmake
+### Build with cmake
 ```
 # Debug (Release)
 mkdir -p _build/Debug
@@ -9,7 +9,7 @@ cmake -DCMAKE_BUILD_TYPE=Debug ../..
 cd -
 make -C _build/Debug
 # run
-./_build/Debug/server
+./_build/Debug/server 1337
 ```
 
 ### Implementation Details
