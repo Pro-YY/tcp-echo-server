@@ -144,9 +144,8 @@ static void *worker_routine(void *data) {
                         fprintf(stdout, "client disconnected\n");
                     }
                     else {
-                        // handle_error("recv: %s\n", strerror(errno));
                         // not error-exit here
-                        fprintf(stderr, "recv error: %d\n", strerror(errno));
+                        fprintf(stderr, "recv error: %s\n", strerror(errno));
                     }
                 }
 
@@ -183,7 +182,8 @@ static void *worker_routine(void *data) {
                                 ((line_t *)events[i].data.ptr)->fd, nsend);
                     }
                     else {
-                        handle_error("send: %s\n", strerror(errno));
+                        // not error-exit here
+                        fprintf(stderr, "recv error: %s\n", strerror(errno));
                     }
 
                     // after send line, restore to read
