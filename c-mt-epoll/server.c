@@ -102,7 +102,7 @@ static void *worker_routine(void *data) {
                         }
                         break;  // exit accept new connection for this run
                     }
-                    printf("worker[%d] accepted connection on %d\n", tnum, cfd);
+                    printf("worker[%d] accepted connection on fd(%d)\n", tnum, cfd);
 
                     // register the new connected fd
                     event.data.ptr = (struct line *)malloc(sizeof(struct line));
@@ -141,10 +141,12 @@ static void *worker_routine(void *data) {
                 }
                 else {
                     if (errno == ECONNRESET) {
-                        printf("client disconnected\n");
+                        fprintf(stdout, "client disconnected\n");
                     }
                     else {
-                        handle_error("recv: %s\n", strerror(errno));
+                        // handle_error("recv: %s\n", strerror(errno));
+                        // not error-exit here
+                        fprintf(stderr, "recv error: %d\n", strerror(errno));
                     }
                 }
 

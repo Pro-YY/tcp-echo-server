@@ -14,6 +14,6 @@ make -C _build/Debug
 
 ### Implementation Details
 
-1. multi-threaded: using pthread
+1. thread pool: pthread
 
-2. epoll event loop: epoll ET with non-blocking IO
+2. event loop: epoll ET with non-blocking IO
