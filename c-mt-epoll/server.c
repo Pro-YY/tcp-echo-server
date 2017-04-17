@@ -21,7 +21,7 @@
 
 #define NUM_THREADS 4
 #define MAX_EVENTS_SIZE 1024
-#define MAX_BUFFER_SIZE 16
+#define MAX_BUFFER_SIZE 8
 #define MAX_LINE_SIZE 1024
 
 static int PORT = 7000;
@@ -83,7 +83,7 @@ static void *worker_routine(void *data) {
 
     // event loop
     for (;;) {
-        nfds = epoll_wait(epfd, events, MAX_EVENTS_SIZE, -1);
+        nfds = epoll_wait(epfd, events, MAX_EVENTS_SIZE, -1);   // block until event
         for (i = 0; i < nfds; i++) {
             if (events[i].data.fd == sfd && (events[i].events & EPOLLIN)) {
                 // listening socket event, new client connected
@@ -95,14 +95,14 @@ static void *worker_routine(void *data) {
                     if (cfd == -1) {
                         if (errno == EAGAIN) {
                             // all connections accepted
-                            debug_print("accept again: %s\n", strerror(errno));
+                            // debug_print("accept again: %s\n", strerror(errno));
                         }
                         else {
                             handle_error("accept: %s\n", strerror(errno));
                         }
                         break;  // exit accept new connection for this run
                     }
-                    printf("worker[%d] accepted connection on fd(%d)\n", tnum, cfd);
+                    fprintf(stdout, "worker[%d] accepted connection on fd(%d)\n", tnum, cfd);
 
                     // register the new connected fd
                     event.data.ptr = (struct line *)malloc(sizeof(struct line));
@@ -133,7 +133,7 @@ static void *worker_routine(void *data) {
                     ((line_t *)events[i].data.ptr)->size += nrecv;
                 }
                 if (nrecv == 0) {
-                    debug_print("recv zero: %d\n", ((line_t *)events[i].data.ptr)->fd);
+                    //debug_print("recv zero: %d\n", ((line_t *)events[i].data.ptr)->fd);
                 }
                 else if (nrecv == -1 && errno == EAGAIN) {
                     // what we want
@@ -150,9 +150,7 @@ static void *worker_routine(void *data) {
                 }
 
                 // got whole line
-                debug_print("worker[%d](%d) recv: %lu bytes\n", tnum,
-                        ((line_t *)events[i].data.ptr)->fd,
-                        ((line_t *)events[i].data.ptr)->size);
+                // debug_print("worker[%d](%d) recv: %lu bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd, ((line_t *)events[i].data.ptr)->size);
                 // write(1, ((line_t *)events[i].data.ptr)->buf, ((line_t *)events[i].data.ptr)->size);
 
                 // modify event to send
@@ -164,26 +162,25 @@ static void *worker_routine(void *data) {
                 // recv zero or more data
                 // just close when recv zero
                 if (((line_t *)events[i].data.ptr)->size == 0) {
-                    printf("worker[%d](%d) close\n", tnum,
-                            ((struct line *)events[i].data.ptr)->fd);
+                    //debug_print("worker[%d](%d) close\n", tnum, ((struct line *)events[i].data.ptr)->fd);
                     close(((line_t *)events[i].data.ptr)->fd);
                     free(events[i].data.ptr);
                 }
                 else {
+                    // TODO whether use while send untill EAGAIN here???
                     nsend = -1;
-                    if ((nsend = send(
-                            ((line_t *)events[i].data.ptr)->fd,
-                            ((line_t *)events[i].data.ptr)->buf,
-                            ((line_t *)events[i].data.ptr)->size,
-                            0
-                        )
-                    ) > 0 ) {
-                        debug_print("worker[%d](%d) send: %lu bytes\n", tnum,
-                                ((line_t *)events[i].data.ptr)->fd, nsend);
+                    nsend = send(
+                        ((line_t *)events[i].data.ptr)->fd,
+                        ((line_t *)events[i].data.ptr)->buf,
+                        ((line_t *)events[i].data.ptr)->size,
+                        0
+                    );
+                    if (nsend == -1 ||
+                        nsend != ((line_t *)events[i].data.ptr)->size) {
+                        handle_error("send error: %lu, %s\n", nsend, strerror(errno));
                     }
                     else {
-                        // not error-exit here
-                        fprintf(stderr, "recv error: %s\n", strerror(errno));
+                        //debug_print("[%d](%d)send %lu bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd, nsend);
                     }
 
                     // after send line, restore to read
