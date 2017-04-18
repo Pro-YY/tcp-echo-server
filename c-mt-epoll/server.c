@@ -21,10 +21,15 @@
 
 #define NUM_THREADS 4
 #define MAX_EVENTS_SIZE 1024
-#define MAX_BUFFER_SIZE 8
+#define MAX_BUFFER_SIZE 4
 #define MAX_LINE_SIZE 1024
 
 static int PORT = 7000;
+
+static int send_buf_size;   // default 46080, min 4608
+static int send_buf_size_len = sizeof(send_buf_size);
+static int recv_buf_size;   // default 374400
+static int recv_buf_size_len = sizeof(recv_buf_size);
 
 typedef struct thread_info {
     pthread_t thread_id;
@@ -47,7 +52,7 @@ static void *worker_routine(void *data) {
     struct epoll_event event;
     int s = -1;
     int nfds, i;
-    ssize_t nrecv, nsend;
+    ssize_t nrecv, nsend, nneed;
 
     // init sockaddr struct
     memset(&server_addr, 0, sizeof(server_addr));
@@ -104,6 +109,20 @@ static void *worker_routine(void *data) {
                     }
                     fprintf(stdout, "worker[%d] accepted connection on fd(%d)\n", tnum, cfd);
 
+                    // setopt on new client fd
+                    /*
+                    s = setsockopt(cfd, SOL_SOCKET, SO_SNDBUF, &send_buf_size, send_buf_size_len);
+                    if (s == -1) handle_error("setsockopt: %s\n", strerror(errno));
+                    */
+                    // print sockopt
+                    s = getsockopt(cfd, SOL_SOCKET, SO_RCVBUF, &recv_buf_size, &recv_buf_size_len);
+                    if (s == -1) handle_error("getsockopt: %s\n", strerror(errno));
+                    s = getsockopt(cfd, SOL_SOCKET, SO_SNDBUF, &send_buf_size, &send_buf_size_len);
+                    if (s == -1) handle_error("getsockopt: %s\n", strerror(errno));
+                    debug_print("default recv buf size: %d\n", recv_buf_size);
+                    debug_print("default send buf size: %d\n", send_buf_size);
+
+
                     // register the new connected fd
                     event.data.ptr = (struct line *)malloc(sizeof(struct line));
                     if (!event.data.ptr) handle_error("malloc event\n");
@@ -128,16 +147,17 @@ static void *worker_routine(void *data) {
                         )
                 ) > 0) {
                     // got buffer filled
-                    // write(1, ((line_t *)events[i].data.ptr)->buf + ((line_t *)events[i].data.ptr)->size, nrecv);
-                    // printf("\n");
+                    printf("got buffer:\n");
+                    write(1, ((line_t *)events[i].data.ptr)->buf + ((line_t *)events[i].data.ptr)->size, nrecv);
+                    printf("\n");
                     ((line_t *)events[i].data.ptr)->size += nrecv;
                 }
                 if (nrecv == 0) {
-                    //debug_print("recv zero: %d\n", ((line_t *)events[i].data.ptr)->fd);
+                    debug_print("[%d](%d) recv zero bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd);
                 }
                 else if (nrecv == -1 && errno == EAGAIN) {
                     // what we want
-                    //debug_print("all received with eagain: %s\n", strerror(errno));
+                    debug_print("recv reach eagain: %s\n", strerror(errno));
                 }
                 else {
                     if (errno == ECONNRESET) {
@@ -150,8 +170,8 @@ static void *worker_routine(void *data) {
                 }
 
                 // got whole line
-                // debug_print("worker[%d](%d) recv: %lu bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd, ((line_t *)events[i].data.ptr)->size);
-                // write(1, ((line_t *)events[i].data.ptr)->buf, ((line_t *)events[i].data.ptr)->size);
+                debug_print("worker[%d](%d) recv whole line: %lu bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd, ((line_t *)events[i].data.ptr)->size);
+                write(1, ((line_t *)events[i].data.ptr)->buf, ((line_t *)events[i].data.ptr)->size);
 
                 // modify event to send
                 events[i].events = EPOLLOUT | EPOLLET;
@@ -162,32 +182,43 @@ static void *worker_routine(void *data) {
                 // recv zero or more data
                 // just close when recv zero
                 if (((line_t *)events[i].data.ptr)->size == 0) {
-                    //debug_print("worker[%d](%d) close\n", tnum, ((struct line *)events[i].data.ptr)->fd);
+                    debug_print("worker[%d](%d) close\n", tnum, ((struct line *)events[i].data.ptr)->fd);
                     close(((line_t *)events[i].data.ptr)->fd);
                     free(events[i].data.ptr);
+                    continue;
                 }
-                else {
-                    // TODO whether use while send untill EAGAIN here???
-                    nsend = -1;
+
+                // TODO whether use while send untill EAGAIN here, how to make eagain happen?
+                nsend = 0;
+                nneed = ((line_t *)events[i].data.ptr)->size;   // bytes that needs to be send
+                while (nneed > 0) {
+                    debug_print("need to send: %zd byte(s)\n", nneed);
                     nsend = send(
                         ((line_t *)events[i].data.ptr)->fd,
-                        ((line_t *)events[i].data.ptr)->buf,
-                        ((line_t *)events[i].data.ptr)->size,
+                        ((line_t *)events[i].data.ptr)->buf + nsend,
+                        nneed,
                         0
                     );
-                    if (nsend == -1 ||
-                        nsend != ((line_t *)events[i].data.ptr)->size) {
-                        handle_error("send error: %lu, %s\n", nsend, strerror(errno));
+                    if (nsend > 0) {
+                        debug_print("[%d](%d) send %lu byte(s) to buffer\n", tnum, ((line_t *)events[i].data.ptr)->fd, nsend);
+                        nneed -= nsend;
+                        debug_print("send: %zd, need: %zd\n", nsend, nneed);
+                    }
+                    else if (nsend == 0) {
+                        debug_print("warn: [%d](%d) send zero bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd);
+                    }
+                    else if (nsend == -1 && errno == EAGAIN) {
+                        debug_print("send reach eagain: %s\n", strerror(errno));
                     }
                     else {
-                        //debug_print("[%d](%d)send %lu bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd, nsend);
+                        handle_error("send error: %s\n", strerror(errno));
                     }
-
-                    // after send line, restore to read
-                    events[i].events = EPOLLIN | EPOLLET;
-                    epoll_ctl(epfd, EPOLL_CTL_MOD,
-                            ((line_t *)events[i].data.ptr)->fd, &events[i]);
                 }
+
+                // after send line, restore to read
+                events[i].events = EPOLLIN | EPOLLET;
+                epoll_ctl(epfd, EPOLL_CTL_MOD,
+                        ((line_t *)events[i].data.ptr)->fd, &events[i]);
             }
             else {
                 printf("unknown event occured %d\n", events[i].data.fd);
