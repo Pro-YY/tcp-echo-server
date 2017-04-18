@@ -21,7 +21,7 @@
 
 #define NUM_THREADS 4
 #define MAX_EVENTS_SIZE 1024
-#define MAX_BUFFER_SIZE 4
+#define BUFFER_SIZE 16       // user-space send/recv buffer
 #define MAX_LINE_SIZE 1024
 
 static int PORT = 7000;
@@ -53,6 +53,7 @@ static void *worker_routine(void *data) {
     int s = -1;
     int nfds, i;
     ssize_t nrecv, nsend, nneed;
+    int nsends;
 
     // init sockaddr struct
     memset(&server_addr, 0, sizeof(server_addr));
@@ -115,13 +116,14 @@ static void *worker_routine(void *data) {
                     if (s == -1) handle_error("setsockopt: %s\n", strerror(errno));
                     */
                     // print sockopt
+                    /*
                     s = getsockopt(cfd, SOL_SOCKET, SO_RCVBUF, &recv_buf_size, &recv_buf_size_len);
                     if (s == -1) handle_error("getsockopt: %s\n", strerror(errno));
                     s = getsockopt(cfd, SOL_SOCKET, SO_SNDBUF, &send_buf_size, &send_buf_size_len);
                     if (s == -1) handle_error("getsockopt: %s\n", strerror(errno));
                     debug_print("default recv buf size: %d\n", recv_buf_size);
                     debug_print("default send buf size: %d\n", send_buf_size);
-
+                    */
 
                     // register the new connected fd
                     event.data.ptr = (struct line *)malloc(sizeof(struct line));
@@ -143,21 +145,24 @@ static void *worker_routine(void *data) {
                             ((line_t *)events[i].data.ptr)->fd,
                             ((line_t *)events[i].data.ptr)->buf +
                                     ((line_t *)events[i].data.ptr)->size,
-                            MAX_BUFFER_SIZE, 0
+                            BUFFER_SIZE, 0
                         )
                 ) > 0) {
                     // got buffer filled
+                    /*
                     printf("got buffer:\n");
                     write(1, ((line_t *)events[i].data.ptr)->buf + ((line_t *)events[i].data.ptr)->size, nrecv);
                     printf("\n");
+                    */
                     ((line_t *)events[i].data.ptr)->size += nrecv;
                 }
                 if (nrecv == 0) {
-                    debug_print("[%d](%d) recv zero bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd);
+                    // always happen
+                    // debug_print("[%d](%d) recv zero bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd);
                 }
                 else if (nrecv == -1 && errno == EAGAIN) {
-                    // what we want
-                    debug_print("recv reach eagain: %s\n", strerror(errno));
+                    // what we want, can always happen
+                    //debug_print("recv reach eagain: %s\n", strerror(errno));
                 }
                 else {
                     if (errno == ECONNRESET) {
@@ -170,8 +175,10 @@ static void *worker_routine(void *data) {
                 }
 
                 // got whole line
+                /*
                 debug_print("worker[%d](%d) recv whole line: %lu bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd, ((line_t *)events[i].data.ptr)->size);
                 write(1, ((line_t *)events[i].data.ptr)->buf, ((line_t *)events[i].data.ptr)->size);
+                */
 
                 // modify event to send
                 events[i].events = EPOLLOUT | EPOLLET;
@@ -189,31 +196,44 @@ static void *worker_routine(void *data) {
                 }
 
                 // TODO whether use while send untill EAGAIN here, how to make eagain happen?
-                nsend = 0;
-                nneed = ((line_t *)events[i].data.ptr)->size;   // bytes that needs to be send
+                nsend = 0;  // each send bytes returned
+                nsends = 0; // send counts
+                nneed = ((line_t *)events[i].data.ptr)->size;   // bytes that still needs to be send
                 while (nneed > 0) {
-                    debug_print("need to send: %zd byte(s)\n", nneed);
+                    //debug_print("need to send: %zd byte(s)\n", nneed);
                     nsend = send(
                         ((line_t *)events[i].data.ptr)->fd,
-                        ((line_t *)events[i].data.ptr)->buf + nsend,
-                        nneed,
+                        ((line_t *)events[i].data.ptr)->buf + nsends * BUFFER_SIZE,
+                        nneed < BUFFER_SIZE ? nneed : BUFFER_SIZE,
                         0
                     );
                     if (nsend > 0) {
-                        debug_print("[%d](%d) send %lu byte(s) to buffer\n", tnum, ((line_t *)events[i].data.ptr)->fd, nsend);
+                        //debug_print("[%d](%d) send %lu byte(s) to buffer\n", tnum, ((line_t *)events[i].data.ptr)->fd, nsend);
                         nneed -= nsend;
-                        debug_print("send: %zd, need: %zd\n", nsend, nneed);
+                        nsends++;
+                        //debug_print("send: %zd, need: %zd\n", nsend, nneed);
                     }
                     else if (nsend == 0) {
+                        // never happens till now
                         debug_print("warn: [%d](%d) send zero bytes\n", tnum, ((line_t *)events[i].data.ptr)->fd);
                     }
                     else if (nsend == -1 && errno == EAGAIN) {
+                        // never happens till now
                         debug_print("send reach eagain: %s\n", strerror(errno));
                     }
                     else {
                         handle_error("send error: %s\n", strerror(errno));
                     }
                 }
+                // TODO: does user space buffering really needed? the following is ok.
+                /*
+                send(
+                    ((line_t *)events[i].data.ptr)->fd,
+                    ((line_t *)events[i].data.ptr)->buf,
+                    ((line_t *)events[i].data.ptr)->size,
+                    0
+                );
+                */
 
                 // after send line, restore to read
                 events[i].events = EPOLLIN | EPOLLET;
