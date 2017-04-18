@@ -222,7 +222,7 @@ static void *worker_routine(void *data) {
                         debug_print("send reach eagain: %s\n", strerror(errno));
                     }
                     else {
-                        handle_error("send error: %s\n", strerror(errno));
+                        fprintf(stderr, "send error: %s\n", strerror(errno));
                     }
                 }
                 // TODO: does user space buffering really needed? the following is ok.
